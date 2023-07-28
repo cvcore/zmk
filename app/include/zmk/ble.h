@@ -38,3 +38,7 @@ int zmk_ble_unpair_all();
 void zmk_ble_set_peripheral_addr(bt_addr_le_t *addr);
 bt_addr_le_t *zmk_ble_get_peripheral_addr();
 #endif /* IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL) */
+
+#if IS_ENABLED(CONFIG_ZMK_HANDLE_BLE_DISCONNECTION)
+bool ble_seeking_connection();
+#endif
