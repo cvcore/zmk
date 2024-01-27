@@ -183,18 +183,18 @@ int update_advertising() {
     } else {
 #if IS_ENABLED(CONFIG_ZMK_HANDLE_BLE_DISCONNECTION)
         if (!zmk_ble_active_profile_is_connected() && active_profile_seeking_connection) {
-            desired_adv = ZMK_ADV_CONN;
+            desired_adv = ZMK_ADV_DIR;
         }
 #else
         if (!zmk_ble_active_profile_is_connected()) {
-            desired_adv = ZMK_ADV_CONN;
+            // desired_adv = ZMK_ADV_CONN;
             // Need to fix directed advertising for privacy centrals. See
             // https://github.com/zephyrproject-rtos/zephyr/pull/14984 char
             // addr_str[BT_ADDR_LE_STR_LEN]; bt_addr_le_to_str(zmk_ble_active_profile_addr(),
             // addr_str, sizeof(addr_str));
 
             // LOG_DBG("Directed advertising to %s", addr_str);
-            // desired_adv = ZMK_ADV_DIR;
+            desired_adv = ZMK_ADV_DIR;
         }
 #endif /* IS_ENABLED(CONFIG_ZMK_HANDLE_BLE_DISCONNECTION) */
     }
@@ -280,6 +280,8 @@ int zmk_ble_prof_select(uint8_t index) {
         return 0;
     }
 
+    zmk_ble_disconnect_profile(active_profile);
+
     active_profile = index;
     ble_save_profile();
 
@@ -346,6 +348,23 @@ int zmk_ble_put_peripheral_addr(const bt_addr_le_t *addr) {
 }
 
 #endif /* IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL) */
+
+int zmk_ble_disconnect_profile(uint8_t profile_index) {
+    if (profile_index >= ZMK_BLE_PROFILE_COUNT) {
+        return -ERANGE;
+    }
+    struct bt_conn *conn;
+    const bt_addr_le_t *addr = &profiles[profile_index].peer;
+    if (!bt_addr_le_cmp(addr, BT_ADDR_LE_ANY)) {
+        return -ENODEV;
+    } else if ((conn = bt_conn_lookup_addr_le(BT_ID_DEFAULT, addr)) == NULL) {
+        return -ENOTCONN;
+    }
+    int err_code = bt_conn_disconnect(conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
+    bt_conn_unref(conn);
+
+    return err_code;
+}
 
 #if IS_ENABLED(CONFIG_SETTINGS)
 
@@ -777,5 +796,23 @@ static int ble_keypress_listener(const zmk_event_t *eh) {
 ZMK_LISTENER(ble_keypress, ble_keypress_listener);
 ZMK_SUBSCRIPTION(ble_keypress, zmk_keycode_state_changed);
 #endif /* IS_ENABLED(CONFIG_ZMK_HANDLE_BLE_DISCONNECTION) */
+
+static int ble_profile_change_listener(const zmk_event_t *eh) {
+    struct zmk_ble_active_profile_changed *active_profile_changed;
+    active_profile_changed = as_zmk_ble_active_profile_changed(eh);
+    if (active_profile_changed != NULL) {
+        int active_index = active_profile_changed->index;
+        for (int i = 0; i < ZMK_BLE_PROFILE_COUNT; i++) {
+            if (active_index == i) {
+                continue;
+            }
+            zmk_ble_disconnect_profile(i);
+            LOG_DBG("Disconnected %d due to profile switch", i);
+        }
+    }
+    return 0;
+}
+ZMK_LISTENER(ble_profile_change, ble_profile_change_listener);
+ZMK_SUBSCRIPTION(ble_profile_change, zmk_ble_active_profile_changed);
 
 SYS_INIT(zmk_ble_init, APPLICATION, CONFIG_ZMK_BLE_INIT_PRIORITY);
